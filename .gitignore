@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+runs/
+tmp/
+*.cache
+# 保留配套best.pt，排除训练中间权重。
+hand_det_weights/weights/epoch*.pt
+hand_det_weights/weights/last.pt
+yolo26n.pt
+wheelhouse/
+

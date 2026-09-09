@@ -1,0 +1,25 @@
+# 教学配置模板，15个检测类别，不包含完全缺失。
+# 通过 train_det.py / test_det.py 运行无需修改路径。
+# 脚本自动生成 runs/hand_data_local.yaml，包含当前电脑的绝对路径。
+# 仅当绕过脚本直接用yolo命令时，须将path改为本机数据集绝对路径。
+path: hand_data_det
+train: train/images
+val: val/images
+test: test/images
+names:
+  0: full_thumb
+  1: slightly_damaged_thumb
+  2: severely_damaged_thumb
+  3: full_index
+  4: slightly_damaged_index
+  5: severely_damaged_index
+  6: full_middle
+  7: slightly_damaged_middle
+  8: severely_damaged_middle
+  9: full_ring
+  10: slightly_damaged_ring
+  11: severely_damaged_ring
+  12: full_pinky
+  13: slightly_damaged_pinky
+  14: severely_damaged_pinky
+

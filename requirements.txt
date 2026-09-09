@@ -1,0 +1,21 @@
+# 根据服务器环境筛选；用户已在Windows验证单图推理和batch=4的一轮训练。
+# Python 3.10；先按README从PyTorch官方cu121源安装torch/torchvision。
+# 此处不写+cu121，允许同版本CPU构建；CUDA构建由第一步安装命令决定。
+torch==2.5.1
+torchvision==0.20.1
+ultralytics==8.4.106
+numpy==2.2.6
+Pillow==12.3.0
+matplotlib==3.10.9
+tqdm==4.67.3
+# 服务器同时安装了两个cv2提供包，无法由清单判断实际加载哪一个。
+# 教学候选环境只选桌面版4.x；此项属于整理后的选择，不是原环境完整复刻。
+opencv-python==4.13.0.92
+# 下列为YOLO相关运行依赖；其余底层依赖交给pip解析。
+PyYAML==6.0.3
+scipy==1.15.3
+polars==1.43.0
+psutil==7.2.2
+requests==2.34.2
+ultralytics-thop==2.0.20
+

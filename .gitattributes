@@ -1,0 +1,11 @@
+# Windows batch files require CRLF; keep source and labels consistent across platforms.
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.yaml text eol=lf
+*.txt text eol=lf
+*.bat text eol=crlf
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.pt binary
