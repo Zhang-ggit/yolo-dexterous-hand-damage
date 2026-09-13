@@ -1,241 +1,316 @@
-# 第五章 基于YOLO的灵巧手缺损状态检测
+# 基于 YOLO 的灵巧手缺损状态检测
 
-本仓库用于《机器人工程实验案例教程》第五章，面向机器人工程、自动化、机械、电气专业学生。
-仓库地址：https://github.com/Zhang-ggit/yolo-dexterous-hand-damage
-在仓库页面选择Code → Download ZIP并完整解压，或使用Git克隆整个仓库。
-图像由Blender渲染，训练/验证/测试集分别为4000/500/500张。
-每张图按一只灵巧手处理。五根手指分别具有完整、轻度缺损（缺一段）、
-重度缺损（缺两段）三种可标注状态，共15个检测类别。
+本仓库是《机器人工程实验案例教程》第五章的配套工程，面向机器人工程、自动化、机械和电气专业学生，使用 YOLO26n 检测灵巧手五根手指的位置与缺损状态。仓库已包含数据集、可直接推理的训练权重、训练记录，以及数据检查、推理、评估和训练脚本。
 
-实验约定：某手指没有置信度达标的检测结果，即输出“完全缺失”。
-完全缺失没有检测框，不作为第16类训练。相同手指存在多个预测时，
-选置信度最高者；同分时选模型返回的第一个。
-因此漏检、遮挡也可能被本实验规则转换为“完全缺失”，需在误差分析中说明。
+> **学生不训练模型也能完成基础实验。** 默认推理和评估脚本会自动加载 `hand_det_weights/weights/best.pt`。只有“重新训练模型”一节中的命令会更新模型参数。
 
-## 1. 文件说明
+## 任务定义
+
+每张图像包含一只灵巧手。五根手指分别具有三种可检测状态，共 15 个检测类别：
+
+- 完整：`full_*`
+- 轻度缺损（缺一段）：`slightly_damaged_*`
+- 重度缺损（缺两段）：`severely_damaged_*`
+
+其中 `*` 为 `thumb`、`index`、`middle`、`ring` 或 `pinky`。
+
+“完全缺失”不是第 16 个检测类别，因为完全缺失的手指没有可标注实体，也没有检测框。后处理程序按以下规则生成固定的五指中文报告：
+
+1. 对每根手指保留置信度达到阈值的候选。
+2. 同一手指出现多个候选时，选择置信度最高者；同分时保留模型先返回的候选。
+3. 某根手指没有达标候选时，输出“完全缺失”。
+
+因此，“完全缺失”也可能由漏检、遮挡或置信度过低引起，不能脱离原图和真实标签解释。
+
+## 零训练快速开始
+
+以下步骤使用仓库自带的已训练权重，不会训练模型。
+
+### 1. 下载并进入项目
+
+在 GitHub 页面选择 **Code → Download ZIP** 并完整解压，也可以运行：
+
+```bash
+git clone https://github.com/Zhang-ggit/yolo-dexterous-hand-damage.git
+cd yolo-dexterous-hand-damage
+```
+
+后续命令均在仓库根目录执行。脚本根据自身位置解析数据和权重路径，项目放在其他磁盘或含中文、空格的目录中时通常不需要修改源码。
+
+### 2. 安装并验证 Windows 环境
+
+在 **Anaconda Prompt** 中进入项目目录，然后运行：
+
+```bat
+setup_windows.bat
+test_windows.bat
+conda activate hand-yolo26-win
+```
+
+`setup_windows.bat` 创建或复用 Python 3.10 环境并安装依赖；`test_windows.bat` 检查 PyTorch、CUDA、NumPy、OpenCV 和 Ultralytics，并使用配套 `best.pt` 完成一次单图推理。两个批处理文件都不会启动训练。
+
+安装脚本面向 Windows 和 NVIDIA 显卡，使用 PyTorch 2.5.1、torchvision 0.20.1 与 CUDA 12.1 构建。仅使用 CPU 时，建议手动创建环境并安装 CPU 构建：
+
+```bat
+conda create -n hand-yolo26 python=3.10 -y
+conda activate hand-yolo26
+python -m pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -r requirements.txt
+python -m pip check
+```
+
+CUDA 12.1 指 PyTorch 构建携带的运行时版本，不要求另行安装同名 CUDA Toolkit。若显卡需要其他 PyTorch/CUDA 组合，应选择彼此兼容的版本并重新验证环境。
+
+### 3. 运行一次单图检测
+
+```bash
+python predict_hand_status.py
+```
+
+未指定图片时，脚本自动选择测试集按文件名排序后的第一张图，并输出五根手指的中文状态。
+
+指定图片并保存文本：
+
+```bash
+python predict_hand_status.py "hand_data_det/test/images/实际图片.jpg" --output runs/status.txt
+```
+
+请把 `实际图片.jpg` 替换为真实文件名。仓库外的图片可以使用绝对路径。
+
+### 4. 批量生成检测结果
+
+先处理前 16 张测试图：
+
+```bash
+python predict_det.py --limit 16
+```
+
+确认输出正常后处理完整测试集：
+
+```bash
+python predict_det.py
+```
+
+每次运行会创建新的 `runs/predict*` 目录，其中包含：
+
+- `images/`：带检测框的图像；
+- `texts/`：每张图像的五指中文状态；
+- `status.csv`：全部图像的状态汇总。
+
+指定其他图像目录、单张图片或推理设备：
+
+```bash
+python predict_det.py --source "hand_data_det/val/images"
+python predict_det.py --source "其他图片/示例.jpg" --device 0
+python predict_det.py --source "其他图片" --device cpu
+```
+
+自选图片没有标签时可以推理和展示，但不能据此计算准确率、召回率或 mAP。
+
+## 哪些命令不需要训练
+
+| 命令 | 是否会训练 | 是否可直接使用配套权重 | 说明 |
+|---|:---:|:---:|---|
+| `setup_windows.bat` | 否 | 是 | 安装环境，不更新模型参数 |
+| `test_windows.bat` | 否 | 是 | 环境检查和一次配套权重推理 |
+| `python check_dataset.py` | 否 | 不涉及 | 检查图片、标签、类别和重复文件 |
+| `python predict_hand_status.py` | 否 | 是 | 单图五指状态输出 |
+| `python predict_det.py` | 否 | 是 | 单图或文件夹批量检测 |
+| `python test_det.py` | 否 | 是 | 标准检测指标与整图严格匹配评估 |
+| `python compare_conf.py ...` | 否 | 是 | 在验证集重复推理并比较置信度阈值 |
+| `python plot_results.py` | 否 | 是 | 绘制仓库已有的训练记录，不重新训练 |
+| `python test_workflow.py` | 否 | 不涉及 | 检查路径、状态归并与匹配逻辑 |
+| `python train_det.py ...` | **是** | 否 | 从通用预训练模型开始训练或微调 |
+
+以下两类命令不能无条件照抄：
+
+- 包含 `runs/train/hand_det/weights/best.pt` 的命令要求该文件已经由学生训练产生；如果只使用配套权重，请省略 `--weights`，或改为 `--weights hand_det_weights/weights/best.pt`。
+- Word 中的 `model.train(...)`、`model.predict(...)` 和匹配函数代码是程序原理示例，不是直接粘贴到终端执行的命令。
+
+## 数据检查
+
+```bash
+python check_dataset.py
+```
+
+脚本检查以下内容：
+
+- 图片是否可读取，图片与标签是否同名对应；
+- YOLO 标签是否为 `class_id x_center y_center width height` 五列；
+- 类别编号与归一化坐标是否合法；
+- 同一图片是否重复标注同一根手指；
+- 是否存在空标签或跨数据集完全相同的文件。
+
+当前数据集包含训练集 4000 张、验证集 500 张、测试集 500 张。训练集、验证集和测试集分别有 8、1、0 个空标签。空标签表示确认没有可标注目标，不应删除。跨集合文件检查只能发现字节完全相同的图片，不能排除相近视角或相似场景。
+
+## 使用配套权重评估
+
+直接运行全部评估：
+
+```bash
+python test_det.py
+```
+
+该命令默认使用 `hand_det_weights/weights/best.pt` 和测试集，同时输出两类结果：
+
+- 标准检测指标：P、R、mAP50、mAP50-95 及评估图；
+- 自定义整图严格匹配正确率：预测数与真实数相同，并且全部目标可按类别相同、IoU 达标的条件一一匹配。
+
+分别运行标准评估和严格匹配评估：
+
+```bash
+python test_det.py --mode map
+python test_det.py --mode exact --conf 0.35 --match-iou 0.5
+python test_det.py --mode map --split val
+```
+
+标准 mAP 评估内部使用 `conf=0.001` 收集预测以形成 P-R 曲线；命令行参数 `--conf` 只用于整图严格匹配。`--match-iou` 是评估时的框匹配条件，不是预测阶段的 NMS 参数。
+
+结果保存在新的 `runs/evaluate*` 目录。配套权重在 500 张测试图上的记录如下：
+
+| 指标 | 结果 |
+|---|---:|
+| 标准精确率 P | 0.96425 |
+| 标准召回率 R | 0.92944 |
+| mAP50 | 0.98015 |
+| mAP50-95 | 0.79223 |
+| 整图严格匹配正确率 | 387 / 500（77.40%） |
+
+这些结果对应测试集、`imgsz=640`，以及严格匹配的 `conf=0.35`、`match_iou=0.50`。整图严格匹配正确率不是 mAP，也不是五指文本准确率。
+
+### 查看严格匹配错误样例
+
+先生成带错误清单的评估报告：
+
+```bash
+python test_det.py --mode exact
+```
+
+再将终端打印的实际 `metrics.json` 路径传给：
+
+```bash
+python predict_det.py --errors runs/evaluate/metrics.json
+```
+
+如果输出目录已自动编号，例如 `runs/evaluate_2`，必须使用该次运行的真实路径。评估和可视化还应保持相同的 `--weights`、`--source`、`--conf` 与 `--imgsz`。
+
+## 无需训练的参数与曲线实验
+
+在验证集比较置信度阈值：
+
+```bash
+python compare_conf.py --thresholds 0.25 0.35 0.5
+```
+
+该命令不会训练模型，但会对配套权重进行多次验证集推理。它生成 `comparison.csv` 和 `details.json`。阈值应在验证集选择，选定后再固定参数进行一次测试集评估，避免用测试集反复调参。
+
+绘制配套权重已有的训练曲线：
+
+```bash
+python plot_results.py
+```
+
+默认读取 `hand_det_weights/results.csv`，因此学生无需训练。只有绘制学生自己的训练记录时才需要指定新的 CSV：
+
+```bash
+python plot_results.py --csv runs/train/hand_det/results.csv
+```
+
+## 可选实验：重新训练模型
+
+这一节中的命令会训练模型。只完成配套权重的基础实验时可以跳过。
+
+训练脚本默认使用 `yolo26n.pt` 作为通用预训练初始化。首次运行可能联网下载该文件；也可以提前放到仓库根目录。先做一轮流程检查：
+
+```bash
+python train_det.py --epochs 1 --batch 32 --workers 8 --name smoke
+```
+
+RTX 4060 Laptop GPU（约 8 GB）上的完整训练记录使用：
+
+```bash
+python train_det.py --epochs 100 --batch 32 --workers 8 --imgsz 640
+```
+
+显存不足时优先减小批大小；Windows 数据加载异常时可先将 `workers` 改为 0：
+
+```bash
+python train_det.py --epochs 100 --batch 16 --workers 0 --imgsz 640
+```
+
+训练输出写入 `runs/train/hand_det*`，重复运行会创建带编号的新目录，不覆盖配套权重。训练结束后以终端打印的实际路径为准。使用新权重时必须显式指定：
+
+```bash
+python predict_hand_status.py --weights runs/train/hand_det/weights/best.pt
+python test_det.py --weights runs/train/hand_det/weights/best.pt
+```
+
+文档中的本机完整训练记录为 100 轮、`batch=32`、`workers=8`、`imgsz=640`，累计训练时间 3985.61 秒（66.43 分钟）；验证集 P、R、mAP50、mAP50-95 分别为 0.98283、0.97337、0.99335、0.93168。训练时间和指标只适用于该次硬件、数据划分与配置，学生应记录自己的实际结果。
+
+## 路径与输出约定
+
+项目的核心目录如下：
+
+```text
+仓库目录/
+├─ *.py
+├─ requirements.txt
+├─ hand_det.yaml
+├─ hand_data_det/
+│  ├─ train/images/  train/labels/
+│  ├─ val/images/    val/labels/
+│  └─ test/images/   test/labels/
+└─ hand_det_weights/
+   ├─ weights/best.pt
+   └─ results.csv
+```
+
+训练和评估脚本会生成 `runs/hand_data_local.yaml`，其中写入当前计算机的数据集绝对路径。`hand_det.yaml` 是供阅读和直接调用 YOLO CLI 时使用的模板；通过本仓库 Python 脚本运行时无需修改它。
+
+数据或权重在仓库外时使用命令行参数：
+
+```bash
+python check_dataset.py --data-root "D:/datasets/hand_data_det"
+python test_det.py --data-root "D:/datasets/hand_data_det" --weights "D:/models/best.pt"
+python predict_det.py --source "D:/images" --weights "D:/models/best.pt"
+```
+
+外部权重必须是目标检测模型，并具有与本实验一致的 15 类名称和编号，否则脚本会拒绝加载。
+
+## 文件说明
 
 | 文件 | 用途 |
 |---|---|
-| train_det.py | 训练，保留原文件名，已移除服务器路径与强制双GPU |
-| test_det.py | 原严格匹配评估，以及新增的标准mAP评估 |
-| predict_hand_status.py | 输入单图，输出五指中文状态 |
-| predict_det.py | 单图/文件夹检测，保存带框图片、状态文本与汇总CSV |
-| check_dataset.py | 检查图片、标签、类别统计及跨集合相同文件 |
-| compare_conf.py | 在验证集比较置信度阈值 |
-| plot_results.py | 将训练CSV绘制为损失和性能曲线 |
-| experiment_utils.py | 公共路径、配置和模型加载逻辑 |
-| test_workflow.py | 不依赖YOLO的路径及判定规则回归检查 |
-| hand_det.yaml | 供教学阅读的数据配置模板 |
-| hand_det_weights/weights/best.pt | 作者提供的已训练权重 |
-| hand_det_weights/results.csv | 作者原始训练记录 |
+| `predict_hand_status.py` | 单图推理并输出五指中文状态 |
+| `predict_det.py` | 单图或文件夹检测，保存带框图、文本和 CSV |
+| `test_det.py` | 标准 mAP 与整图严格匹配评估 |
+| `compare_conf.py` | 在验证集比较严格匹配置信度阈值 |
+| `plot_results.py` | 从训练 CSV 绘制损失和性能曲线 |
+| `train_det.py` | 可选的模型训练入口 |
+| `check_dataset.py` | 数据完整性、标签格式和重复文件检查 |
+| `experiment_utils.py` | 公共路径、配置、设备和模型加载逻辑 |
+| `test_workflow.py` | 不依赖真实推理的规则与路径回归检查 |
+| `setup_windows.bat` | 创建 Windows Conda 环境并安装依赖 |
+| `test_windows.bat` | 检查环境并运行配套权重单图推理 |
 
-目录结构保持如下即可，无需修改代码路径：
+## 常见问题
 
-    仓库目录/
-      *.py
-      requirements.txt
-      hand_det.yaml
-      hand_data_det/
-        train/images/  train/labels/
-        val/images/    val/labels/
-        test/images/   test/labels/
-      hand_det_weights/
-        weights/best.pt
-        results.csv
+**为什么运行成功不等于识别正确？** 运行成功只说明环境、路径和接口正常。模型仍可能漏检、误检、混淆类别或产生偏移框，应结合带框图和真实标签分析。
 
-## 2. 环境准备
+**为什么 mAP 很高，整图严格匹配仍较低？** mAP 按目标和类别汇总；整图严格匹配要求一张图中的所有目标同时满足数量、类别与 IoU 条件，一处错误就会使整张图不通过。
 
-Windows快速测试：打开Anaconda Prompt，进入仓库目录，先执行
-`setup_windows.bat`，成功后执行`test_windows.bat`。
-这会创建或复用独立环境hand-yolo26-win，安装依赖并检测NumPy/PyTorch转换、
-GPU计算及配套权重的单图推理。脚本失败会停止，便于定位错误。
-脚本不自动启动训练；测试成功后可执行：
+**为什么状态文本与带框图中的目标数不完全一致？** 带框图展示模型保留的检测目标；文本会把同一手指的多个候选归并为一个状态，并为没有达标候选的手指补上“完全缺失”。
 
-    conda run --no-capture-output -n hand-yolo26-win python train_det.py --epochs 1 --batch 16 --name windows_smoke
+**可以把渲染数据上的结果当作真实机器人性能吗？** 不可以。真实摄像机图像还包含材料反射、传感器噪声、运动模糊和照明差异，部署前需要建立独立的真实数据测试集。
 
-Windows安装脚本会先通过download_windows.bat从PyTorch官方站点下载两个Windows/Python3.10
-安装包到wheelhouse目录，再本地安装。下载中的文件以.part结尾；失败后再次运行setup_windows.bat
-会尝试从断点续传，已经完成的.whl文件直接复用。首次从旧版pip临时下载切换到这一流程时，
-不会自动复用pip临时目录中的半成品。其余小型依赖仍需联网安装。
-可单独运行download_windows.bat下载这两个大文件。此功能提高中断后的可恢复性，不保证下载提速。
+**如何快速检查代码逻辑？** 运行：
 
-以作者服务器的Python 3.10环境为基准，使用独立的教学环境。
-下面是从服务器清单筛选的安装方案，已由用户在Windows完成单图推理与1轮训练验证；
-完整测试集评估及batch=16训练仍待验证。
-推荐在新环境安装，不要求更改作者已有的yolo26环境。
+```bash
+python test_workflow.py
+```
 
-    conda create -n hand-yolo26 python=3.10 -y
-    conda activate hand-yolo26
+## 复现实验时应记录
 
-按作者的PyTorch 2.5.1 / torchvision 0.20.1 / CUDA 12.1组合安装，
-以下命令适用于支持该构建的Windows/Linux与NVIDIA显卡：
+至少保存代码版本、数据划分、权重来源、Python/PyTorch/Ultralytics 版本、设备、`epochs`、`batch`、`imgsz`、`workers`、随机种子、实际输出目录、运行时间和评价条件。比较两组模型时，除权重外应尽量保持输入集合、尺寸、阈值和指标口径一致。
 
-    python -m pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
-
-这组版本对应[PyTorch官方历史版本安装说明](https://pytorch.org/get-started/previous-versions/)。
-CUDA 12.1是此PyTorch构建使用的运行时版本，不要求照抄原环境里额外安装的CUDA 13工具包。
-显卡必须受所选构建支持；如果学生电脑需要更新的CUDA/PyTorch，应另行选择配套版本并修改
-requirements.txt中torch与torchvision两行，重新验证，不应强行套用这组旧版本。
-
-仅CPU环境使用以下命令替代上述cu121安装命令：
-
-    python -m pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu
-
-随后在仓库目录执行（其余底层依赖由pip自动解析安装）：
-
-    python -m pip install -r requirements.txt
-    python -m pip check
-    python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA:', torch.cuda.is_available())"
-
-作者提供的原环境记录：Python 3.10.20、PyTorch 2.5.1+cu121、torchvision 0.20.1+cu121、
-Ultralytics 8.4.106、cuDNN 9.1.0、两张RTX 4090。权重元数据中的Ultralytics版本一致。
-requirements.txt固定核心与主要运行依赖，不是全部传递依赖的跨平台锁定文件。
-
-本实验不处理音频，不需要torchaudio；不手工指定cuda-toolkit、CUDA 13包、Triton、
-NCCL等底层组件，由所选PyTorch构建按平台管理所需依赖。不要照搬整个服务器pip清单。
-
-原环境同时存在opencv-python 5.0.0.93和opencv-python-headless 4.13.0.92。
-[OpenCV包说明](https://pypi.org/project/opencv-python/)要求同一环境只选一个cv2提供包。
-仅凭安装清单无法判断实际加载版本。教学候选环境统一选择opencv-python 4.13.0.92，
-用于学生桌面环境，并避免与Ultralytics对opencv-python的依赖重复安装。
-这是有意调整，需要实际验证，不等同于声称原训练使用了这一版本。
-
-[YOLO26官方说明](https://docs.ultralytics.com/models/yolo26/)介绍了本实验使用的模型。
-离线推理需提前安装依赖并下载配套best.pt；首次训练默认模型还需联网下载yolo26n.pt，
-也可预先把它放在仓库根目录。
-
-## 3. 路径为什么不必修改
-
-脚本通过自身文件位置确定仓库根目录，不依赖终端当前目录或作者服务器目录。
-训练和评估会自动生成runs/hand_data_local.yaml，写入当前电脑的数据集绝对路径。
-移动整个仓库后再次运行会重新生成，无需手动维护。请不要并发启动使用不同数据根目录的
-训练/评估任务，因为它们共享这一份自动生成的配置文件。
-
-所有命令行中的相对文件路径也按仓库根目录解释，支持空格和中文路径（有空格时加引号）。
-如果数据或权重放在仓库外，使用--data-root或--weights传入绝对路径。
-这些参数在代码中有注释，不必修改源码。
-
-hand_det.yaml是教学模板。若绕过Python脚本，直接使用yolo命令，
-需要按模板注释将path改为本机数据集绝对路径。
-原hand_det_weights/args.yaml中的服务器路径仅保留为历史训练记录，本项目脚本不使用它。
-
-## 4. 基础实验：已有权重检测
-
-先检查数据：
-
-    python check_dataset.py
-
-无参数运行时，单图脚本自动使用测试集第一张图片：
-
-    python predict_hand_status.py
-
-指定图片并保存文本（把图片路径替换为实际图片）：
-
-    python predict_hand_status.py "hand_data_det/test/images/实际图片.jpg" --output runs/status.txt
-
-检查前16张测试图，生成带框图、每图五指状态文本、status.csv：
-
-    python predict_det.py --limit 16
-
-处理完整测试集：
-
-    python predict_det.py
-
-通过--source可指定其他图片目录或单张图片。图中的类别名使用权重中的英文名称，
-文本和CSV输出中文五指状态。可视化展示模型原始检测框，文本按最高置信度归并为每指一个状态。
-
-## 5. 训练实验
-
-    python train_det.py
-
-默认：YOLO26n、640像素、100轮、batch=16、workers=0。
-自动使用首张CUDA显卡，否则使用CPU。CPU能运行但训练速度需实测。
-默认批大小是起点，不保证适配所有游戏本；出现显存不足时减小：
-
-    python train_det.py --batch 4
-
-先做1轮流程验证：
-
-    python train_det.py --epochs 1 --batch 16 --name smoke
-
-服务器双GPU可手动指定：
-
-    python train_det.py --device 0,1 --batch 64 --workers 8
-
-新训练结果放在runs/train/hand_det，重复运行由YOLO自动增加目录编号，
-不会覆盖作者提供的权重。训练结束会打印实际best.pt路径。
-后续使用自训权重时，根据打印结果指定--weights，例如：
-
-    python predict_hand_status.py --weights runs/train/hand_det/weights/best.pt
-    python test_det.py --weights runs/train/hand_det/weights/best.pt
-
-默认评估始终使用作者提供的best.pt，不会自动切换到最新训练结果。
-作者报告服务器训练约23分钟；学生电脑时间需记录硬件、批大小和实际耗时后填写。
-
-## 6. 评估与错误分析
-
-    python test_det.py
-
-默认在test集输出两类指标：
-- 标准精确率、召回率、mAP50、mAP50-95及评估图。
-- 自定义整图严格匹配正确率：预测与真实框数量相等、类别一致，
-  并存在IoU达到阈值的一一对应匹配。保留原脚本的匹配算法。
-
-标准mAP评估使用conf=0.001收集预测以形成PR曲线；--conf默认0.35，
-仅用于严格匹配评估。标准评估的P/R由Ultralytics定义，不应说成固定0.35下的P/R。
---match-iou默认0.5，是严格匹配条件，不是预测时的NMS参数。
-整图严格匹配正确率不是mAP，也不是逐指状态正确率。
-
-    python test_det.py --mode map
-    python test_det.py --mode exact --conf 0.35 --match-iou 0.5
-    python test_det.py --split val
-
-结果保存至runs/evaluate（再次运行增加后缀）内的metrics.json；
-标准指标图在其map子目录，严格匹配错误列表保存在JSON中。
-检查错误图片（按实际生成目录替换报告路径）：
-
-    python predict_det.py --errors runs/evaluate/metrics.json
-
-如评估使用了自训权重、验证集或其他置信度，可视化时也传入相同--weights、--source和--conf。
-例如验证集评估须配--source hand_data_det/val/images。
-文件缺少标签会报错；无目标图应有空标签文件，不应删除它们。
-
-## 7. 参数对比与训练曲线
-
-置信度对比固定使用val集，避免用测试集调参：
-
-    python compare_conf.py --thresholds 0.25 0.35 0.5
-
-对每个阈值重新运行严格匹配评估，生成comparison.csv与details.json。
-选定阈值后固定它，再用test_det.py进行一次最终测试集评估。
-
-绘制作者的训练曲线：
-
-    python plot_results.py
-
-绘制自己的训练记录：
-
-    python plot_results.py --csv runs/train/hand_det/results.csv
-
-训练和标准评估本身也会生成结果图。实验报告可记录训练设置、
-训练时间、标准指标、严格匹配正确率及典型错误案例。
-
-## 8. 当前验证与发布说明
-
-已对5000张图片进行可读性、标签格式、类别与同指重复标注检查。
-训练集有8个空标签、验证集1个、测试集0个；空标签按无可见标注目标处理。
-未发现完全相同文件跨集合重复；这不等同于检查了相近视角或同场景数据泄漏。
-
-本地逻辑检查：
-
-    python test_workflow.py
-
-用户提供的Windows日志已确认：RTX 4060 Laptop GPU（8GB）、Python 3.10.21、
-PyTorch 2.5.1+cu121、Ultralytics 8.4.106、OpenCV 4.13.0环境下，NumPy转换、
-GPU计算、配套权重单图推理及1轮训练成功。该次训练batch=4，训练器报告0.034小时，
-这是流程验证，不代表100轮训练后的检测精度。按用户要求，默认训练批大小现改为16；
-batch=16的速度和显存占用尚未实测，完整test_det.py评估尚待验证。
-
-.gitignore已排除临时文件、新实验输出、缓存和中间权重，
-保留数据集与配套best.pt。数据/代码许可尚待作者确定，下载入口见本文开头。
-
+数据与代码的许可仍待项目作者明确；在许可确定前，请勿假设可用于商业发布或再次分发。
