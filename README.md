@@ -58,7 +58,7 @@ conda activate hand-yolo26-win
 
 测试脚本检查软件版本、CUDA、NumPy 与 PyTorch 数据转换及一次配套权重推理。看到检查通过后再开展实验；每次新开终端，先进入项目目录并激活上述环境。不要使用其他环境的 `python.exe` 绝对路径运行脚本。
 
-文档的完整训练平台为 RTX 4060 Laptop GPU（约 8 GB 显存）。所选 PyTorch 构建须与显卡及驱动兼容；仅 CPU 运行较慢，可采用以下独立环境：
+文档的完整训练平台为 RTX 4060 Laptop GPU（约 8 GB 显存）。所选 PyTorch 构建须与显卡及驱动兼容；仅 CPU 运行较慢，可采用以下独立环境：（已完成上方三条命令的不必理会下方这五条命令）
 
 ```bat
 conda create -n hand-yolo26-cpu python=3.10 -y
@@ -218,15 +218,6 @@ python predict_det.py --weights runs/train/hand_det/weights/best.pt --errors run
 
 ## 补充：直接使用作者已训练模型
 
-完成环境配置后，也可使用仓库自带的 `hand_det_weights/weights/best.pt`，跳过训练，直接运行：
-
-```bat
-python predict_hand_status.py
-python predict_det.py --limit 16
-python test_det.py
-python plot_results.py
-```
-
-前三条默认加载作者配套权重，最后一条绘制 `hand_det_weights/results.csv` 中已有的训练记录。需要检测自己的图片时，给单图脚本传入图片路径，或给批量脚本增加 `--source`。
+完成环境配置后，也可使用仓库自带的 `hand_det_weights/weights/best.pt`，跳过训练，删除命令中显式指定推理所使用的模型权重文件的部分即可
 
 教材记录的配套权重测试集 mAP50 为 0.98015、mAP50-95 为 0.79223，整图严格匹配为 387/500（77.40%，conf=0.35、匹配 IoU=0.50、imgsz=640）。这组结果与前述学生自训模型的验证成绩属于不同权重和评价子集。
